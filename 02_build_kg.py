@@ -21,7 +21,15 @@ ARES = Namespace("http://antibiotickg.org/resource/")
 
 def clean_uri(text: str) -> str:
     """Trasforma un testo in una stringa usabile come URI."""
-    return text.strip().replace(" ", "_").replace("/", "-").replace(":", "-")
+    return (text.strip()
+                .replace(" ", "_")
+                .replace("/", "-")
+                .replace(":", "-")
+                .replace('"', "")
+                .replace("'", "")
+                .replace("(", "")
+                .replace(")", "")
+                .replace(",", ""))
 
 
 def build_kg():
@@ -30,11 +38,11 @@ def build_kg():
     print("=" * 60)
 
     # Carica i dati
-    with open("data/papers.json") as f:
+    with open("data/papers.json", encoding="utf-8") as f:
         papers = json.load(f)
-    with open("data/authors.json") as f:
+    with open("data/authors.json", encoding="utf-8") as f:
         authors = json.load(f)
-    with open("data/edges.json") as f:
+    with open("data/edges.json", encoding="utf-8") as f:
         edges = json.load(f)
 
     g = Graph()
@@ -47,7 +55,7 @@ def build_kg():
     print("\n[1/4] Definizione ontologia...")
 
     # Classi
-    for cls_name in ["Paper", "Author", "Institution", "Topic"]:
+    for cls_name in ["Paper", "Author", "Institution", "Topic", "Country"]:
         cls = AKG[cls_name]
         g.add((cls, RDF.type, OWL.Class))
         g.add((cls, RDFS.label, Literal(cls_name)))
@@ -58,7 +66,9 @@ def build_kg():
         "hasAuthor":    ("Paper",       "Author"),
         "affiliatedWith": ("Author",    "Institution"),
         "about":        ("Paper",       "Topic"),
-    }
+        "locatedIn":    ("Institution", "Country"),
+      "about":        ("Paper",       "Topic"),}
+        
     for prop_name, (domain, range_) in obj_props.items():
         prop = AKG[prop_name]
         g.add((prop, RDF.type,        OWL.ObjectProperty))
@@ -75,6 +85,10 @@ def build_kg():
         "hasName":       ("Author", XSD.string),
         "hasInstitutionName": ("Institution", XSD.string),
         "hasTopicName":  ("Topic",  XSD.string),
+        "hasCountryCode": ("Country", XSD.string),
+        "hasPublicationType": ("Paper", XSD.string),
+        "isOpenAccess":  ("Paper", XSD.boolean),
+        "hasPrimaryTopic": ("Paper", XSD.string),
     }
     for prop_name, (domain, xsd_type) in dt_props.items():
         prop = AKG[prop_name]
@@ -89,13 +103,16 @@ def build_kg():
     # ── ISTANZE: AUTORI ───────────────────────────────────────────────────────
     print("\n[2/4] Generazione triple: Autori e Istituzioni...")
     institutions = {}  # nome -> URI
+    countries = {}     # country_code -> URI
 
     for author in authors:
         author_uri = ARES[f"author/{clean_uri(author['id'])}"]
         g.add((author_uri, RDF.type,       AKG.Author))
         g.add((author_uri, AKG.hasName,    Literal(author["name"])))
 
-        for inst_name in author.get("institutions", []):
+        for inst in author.get("institutions", []):
+            inst_name = inst.get("name", "")
+            inst_country = inst.get("country", "")
             if not inst_name:
                 continue
             if inst_name not in institutions:
@@ -103,6 +120,15 @@ def build_kg():
                 g.add((inst_uri, RDF.type,                AKG.Institution))
                 g.add((inst_uri, AKG.hasInstitutionName,  Literal(inst_name)))
                 institutions[inst_name] = inst_uri
+
+                # collega l'istituzione al suo paese
+                if inst_country:
+                    if inst_country not in countries:
+                        country_uri = ARES[f"country/{clean_uri(inst_country)}"]
+                        g.add((country_uri, RDF.type,          AKG.Country))
+                        g.add((country_uri, AKG.hasCountryCode, Literal(inst_country)))
+                        countries[inst_country] = country_uri
+                    g.add((inst_uri, AKG.locatedIn, countries[inst_country]))
 
             g.add((author_uri, AKG.affiliatedWith, institutions[inst_name]))
 
@@ -125,6 +151,13 @@ def build_kg():
         if paper.get("year"):
             g.add((paper_uri, AKG.hasYear, Literal(paper["year"], datatype=XSD.integer)))
 
+        if paper.get("type"):
+            g.add((paper_uri, AKG.hasPublicationType, Literal(paper["type"])))
+
+        g.add((paper_uri, AKG.isOpenAccess, Literal(bool(paper.get("is_oa", False)), datatype=XSD.boolean)))
+
+        if paper.get("primary_topic"):
+            g.add((paper_uri, AKG.hasPrimaryTopic, Literal(paper["primary_topic"])))
         # collega autori
         for a in paper.get("authors", []):
             if a["id"]:
