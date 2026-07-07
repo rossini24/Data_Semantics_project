@@ -109,7 +109,8 @@ def extract_paper_info(work: dict) -> dict:
         institutions = [
             {
                 "name": inst.get("display_name", ""),
-                "country": inst.get("country_code", "")
+                "country": inst.get("country_code", ""),
+                "type": inst.get("type", "")
             }
             for inst in a.get("institutions", [])
             if inst.get("display_name")
@@ -289,7 +290,16 @@ if __name__ == "__main__":
     collect_citation_network()
 
 if __name__ == "__main__":
-    collect_citation_network()
+    # ── TEST RAPIDO SU UN SINGOLO PAPER — da rimuovere dopo la verifica ──
+    print("\n=== TEST RAPIDO: verifica campo 'type' istituzioni ===")
+    test_work = get_work_by_doi(SEED_DOI)
+    test_info = extract_paper_info(test_work)
+    for author in test_info["authors"][:3]:  # solo i primi 3 autori
+        print(f"\nAutore: {author['name']}")
+        for inst in author["institutions"]:
+            print(f"  - {inst['name']} | country: {inst['country']} | type: {inst['type']}")
+
+    # collect_citation_network()  # commentato per ora, solo test
 
     # ── TEST RAPIDO — da rimuovere dopo la verifica ──
     print("\n\n=== TEST RAPIDO SU UN PAPER ===")
