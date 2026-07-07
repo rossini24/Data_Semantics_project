@@ -55,7 +55,7 @@ def materialize_inferences():
     print(f"  Nuove triple inferite: {new_triples}")
 
     print(f"\n[3/3] Filtraggio triple non valide e salvataggio...")
-    from rdflib import URIRef, BNode
+    from rdflib import URIRef, BNode, RDFS, OWL
 
     OWL_NOTHING = URIRef("http://www.w3.org/2002/07/owl#Nothing")
 
@@ -71,14 +71,20 @@ def materialize_inferences():
         if s == OWL_NOTHING or o == OWL_NOTHING:
             removed += 1
             continue
+        # scarta subClassOf riflessivo (X subClassOf X)
+        if p == RDFS.subClassOf and s == o:
+            removed += 1
+            continue
+        # scarta subClassOf verso owl:Thing (triviale, sempre vero)
+        if p == RDFS.subClassOf and o == OWL.Thing:
+            removed += 1
+            continue
         g_clean.add((s, p, o))
 
-    print(f"  Triple scartate (soggetto non valido o owl:Nothing): {removed}")
+    print(f"  Triple scartate (non valide/triviali): {removed}")
     print(f"  Triple valide rimaste: {len(g_clean)}")
 
     g_clean.serialize(destination=OUTPUT_PATH, format="turtle", encoding="utf-8")
-
-
 
 
 
