@@ -14,6 +14,8 @@ Output:
 
 import json
 from rdflib import Graph, Namespace, URIRef, Literal, RDF, RDFS, OWL, XSD
+from rdflib.namespace import FOAF
+from itertools import combinations
 
 # ── NAMESPACE ─────────────────────────────────────────────────────────────────
 AKG  = Namespace("http://antibiotickg.org/ontology#")
@@ -50,15 +52,31 @@ def build_kg():
     g.bind("ares", ARES)
     g.bind("owl",  OWL)
     g.bind("xsd",  XSD)
+    g.bind("foaf", FOAF)
 
     # ── DEFINIZIONE ONTOLOGIA (classi e proprietà) ────────────────────────────
     print("\n[1/4] Definizione ontologia...")
 
-    # Classi
-    for cls_name in ["Paper", "Author", "Institution", "Topic", "Country"]:
-        cls = AKG[cls_name]
-        g.add((cls, RDF.type, OWL.Class))
-        g.add((cls, RDFS.label, Literal(cls_name)))
+    # Disgiunzione tra classi: nessuna istanza può appartenere
+    # contemporaneamente a due di queste classi
+    # Sottoclassi di Institution, basate sul campo "type" di OpenAlex
+    institution_subclasses = {
+        "education": "AcademicInstitution",
+        "company": "CompanyInstitution",
+        "nonprofit": "NonprofitInstitution",
+    }
+    for subclass_name in institution_subclasses.values():
+        subcls = AKG[subclass_name]
+        g.add((subcls, RDF.type, OWL.Class))
+        g.add((subcls, RDFS.subClassOf, AKG.Institution))
+        g.add((subcls, RDFS.label, Literal(subclass_name)))
+
+    class_names = ["Paper", "Author", "Institution", "Topic", "Country"]
+    for cls_a, cls_b in combinations(class_names, 2):
+        g.add((AKG[cls_a], OWL.disjointWith, AKG[cls_b]))
+    
+    # Equivalenza con vocabolario standard esterno (FOAF)
+    g.add((AKG.Author, RDFS.subClassOf, FOAF.Person))
 
     # Proprietà oggetto
     obj_props = {
@@ -67,14 +85,20 @@ def build_kg():
         "affiliatedWith": ("Author",    "Institution"),
         "about":        ("Paper",       "Topic"),
         "locatedIn":    ("Institution", "Country"),
-      "about":        ("Paper",       "Topic"),}
-        
+        "citedBy":      ("Paper",       "Paper"),
+        "coAuthorWith": ("Author",      "Author"),
+    }
     for prop_name, (domain, range_) in obj_props.items():
         prop = AKG[prop_name]
         g.add((prop, RDF.type,        OWL.ObjectProperty))
         g.add((prop, RDFS.domain,     AKG[domain]))
         g.add((prop, RDFS.range,      AKG[range_]))
         g.add((prop, RDFS.label,      Literal(prop_name)))
+
+    # Dichiarazione di inversione: citedBy è l'inverso di cites
+    g.add((AKG.cites, OWL.inverseOf, AKG.citedBy))
+    # Dichiarazione di simmetria: coAuthorWith è simmetrica
+    g.add((AKG.coAuthorWith, RDF.type, OWL.SymmetricProperty))
 
     # Proprietà datatype
     dt_props = {
@@ -96,7 +120,7 @@ def build_kg():
         g.add((prop, RDFS.domain, AKG[domain]))
         g.add((prop, RDFS.range,  xsd_type))
 
-    print(f"  Classi definite: 4")
+    print(f"  Classi definite: 5")
     print(f"  Proprietà oggetto: {len(obj_props)}")
     print(f"  Proprietà datatype: {len(dt_props)}")
 
@@ -113,6 +137,7 @@ def build_kg():
         for inst in author.get("institutions", []):
             inst_name = inst.get("name", "")
             inst_country = inst.get("country", "")
+            inst_type = inst.get("type", "")
             if not inst_name:
                 continue
             if inst_name not in institutions:
@@ -120,6 +145,11 @@ def build_kg():
                 g.add((inst_uri, RDF.type,                AKG.Institution))
                 g.add((inst_uri, AKG.hasInstitutionName,  Literal(inst_name)))
                 institutions[inst_name] = inst_uri
+
+                # assegna anche la sottoclasse specifica, se il type è noto
+                if inst_type in institution_subclasses:
+                    subclass_uri = AKG[institution_subclasses[inst_type]]
+                    g.add((inst_uri, RDF.type, subclass_uri))
 
                 # collega l'istituzione al suo paese
                 if inst_country:
@@ -159,10 +189,16 @@ def build_kg():
         if paper.get("primary_topic"):
             g.add((paper_uri, AKG.hasPrimaryTopic, Literal(paper["primary_topic"])))
         # collega autori
-        for a in paper.get("authors", []):
-            if a["id"]:
-                author_uri = ARES[f"author/{clean_uri(a['id'])}"]
-                g.add((paper_uri, AKG.hasAuthor, author_uri))
+        paper_author_ids = [a["id"] for a in paper.get("authors", []) if a["id"]]
+        for author_id in paper_author_ids:
+            author_uri = ARES[f"author/{clean_uri(author_id)}"]
+            g.add((paper_uri, AKG.hasAuthor, author_uri))
+
+        # co-autorialità: collega ogni coppia di autori dello stesso paper
+        for id_a, id_b in combinations(paper_author_ids, 2):
+            uri_a = ARES[f"author/{clean_uri(id_a)}"]
+            uri_b = ARES[f"author/{clean_uri(id_b)}"]
+            g.add((uri_a, AKG.coAuthorWith, uri_b))
 
         # collega topic/concetti
         for concept in paper.get("concepts", []):
