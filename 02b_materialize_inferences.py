@@ -54,8 +54,34 @@ def materialize_inferences():
     print(f"  Triple totali (dopo l'inferenza): {triples_after}")
     print(f"  Nuove triple inferite: {new_triples}")
 
-    print(f"\n[3/3] Salvataggio grafo arricchito in {OUTPUT_PATH}...")
-    g.serialize(destination=OUTPUT_PATH, format="turtle")
+    print(f"\n[3/3] Filtraggio triple non valide e salvataggio...")
+    from rdflib import URIRef, BNode
+
+    OWL_NOTHING = URIRef("http://www.w3.org/2002/07/owl#Nothing")
+
+    g_clean = Graph()
+    for prefix, namespace in g.namespaces():
+        g_clean.bind(prefix, namespace)
+
+    removed = 0
+    for s, p, o in g:
+        if not isinstance(s, (URIRef, BNode)):
+            removed += 1
+            continue
+        if s == OWL_NOTHING or o == OWL_NOTHING:
+            removed += 1
+            continue
+        g_clean.add((s, p, o))
+
+    print(f"  Triple scartate (soggetto non valido o owl:Nothing): {removed}")
+    print(f"  Triple valide rimaste: {len(g_clean)}")
+
+    g_clean.serialize(destination=OUTPUT_PATH, format="turtle", encoding="utf-8")
+
+
+
+
+
 
     print("\n" + "=" * 60)
     print("MATERIALIZZAZIONE COMPLETATA")
