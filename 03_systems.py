@@ -18,22 +18,26 @@ Come suggerito dal prof, alternativa più potente: BGE-M3 (arxiv:2402.03216)
 import os
 import json
 import numpy as np
-import anthropic
+from dotenv import load_dotenv
+from google import genai
+from google.genai import types
 from sentence_transformers import SentenceTransformer
 from rdflib import Graph
 
+load_dotenv()  # legge il file .env e carica GOOGLE_API_KEY nell'ambiente
+
 # ── CONFIGURAZIONE ────────────────────────────────────────────────────────────
-MODEL          = "claude-sonnet-4-6"   # oppure "gemini-..." se usate Google API
+MODEL          = "gemini-2.5-flash"
 MAX_TOKENS     = 1024
-KG_PATH        = "data/antibiotic_kg.ttl"
+KG_PATH        = "data/antibiotic_kg_inferred.ttl"
 PAPERS_PATH    = "data/papers.json"
 ABSTRACTS_PATH = "data/abstracts.json"
 
-# Modello embedding — cambiare qui per usare BGE-M3:
+# BGE-M3 commentato per velocità di sviluppo — MiniLM attivo come richiesto:
 # EMBED_MODEL = "BAAI/bge-m3"
 EMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
-client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+client = genai.Client(api_key=os.environ.get("GOOGLE_API_KEY"))
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -44,18 +48,24 @@ client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
 
 def system1_parametric_llm(question: str) -> str:
     """Risponde alla domanda senza alcun contesto esterno."""
-    response = client.messages.create(
-        model=MODEL,
-        max_tokens=MAX_TOKENS,
-        system=(
-            "You are a scientific assistant. Answer the following question "
-            "about scientific papers and authors as accurately as possible. "
-            "If you are not sure, say so explicitly — do not invent facts."
-        ),
-        messages=[{"role": "user", "content": question}]
-    )
-    return response.content[0].text
-
+    try:
+        response = client.models.generate_content(
+            model=MODEL,
+            contents=question,
+            config=types.GenerateContentConfig(
+                system_instruction=(
+                    "You are a scientific assistant. Answer the following question "
+                    "about scientific papers and authors as accurately as possible. "
+                    "If you are not sure, say so explicitly — do not invent facts."
+                ),
+                max_output_tokens=MAX_TOKENS,
+                temperature=0,
+                thinking_config=types.ThinkingConfig(thinking_budget=0),
+            )
+        )
+        return response.text
+    except Exception as e:
+        return f"[ERRORE API] {e}"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # SYSTEM 2 — DOCUMENT RAG con sentence-transformers
@@ -75,13 +85,13 @@ class DocumentRAG:
         print(f"[System 2] Caricamento modello embedding: {EMBED_MODEL}...")
         self.model = SentenceTransformer(EMBED_MODEL)
 
-        with open(papers_path) as f:
+        with open(papers_path, encoding="utf-8") as f:
             papers = json.load(f)
 
         # Carica gli abstract se disponibili
         abstracts = {}
         if os.path.exists(abstracts_path):
-            with open(abstracts_path) as f:
+            with open(abstracts_path, encoding="utf-8") as f:
                 abstracts = json.load(f)
             print(f"  Abstract disponibili: {sum(1 for v in abstracts.values() if v)}/{len(abstracts)}")
         else:
@@ -148,24 +158,29 @@ class DocumentRAG:
             for c in retrieved
         ])
 
-        response = client.messages.create(
-            model=MODEL,
-            max_tokens=MAX_TOKENS,
-            system=(
-                "You are a scientific assistant. Answer the question using ONLY "
-                "the information provided in the context below. "
-                "If the context does not contain enough information, say so explicitly."
-            ),
-            messages=[{
-                "role": "user",
-                "content": f"Context:\n{context}\n\nQuestion: {question}"
-            }]
-        )
+        try:
+            response = client.models.generate_content(
+                model=MODEL,
+                contents=f"Context:\n{context}\n\nQuestion: {question}",
+                config=types.GenerateContentConfig(
+                    system_instruction=(
+                        "You are a scientific assistant. Answer the question using ONLY "
+                        "the information provided in the context below. "
+                        "If the context does not contain enough information, say so explicitly."
+                    ),
+                    max_output_tokens=MAX_TOKENS,
+                    temperature=0,
+                    thinking_config=types.ThinkingConfig(thinking_budget=0),
+                )
+            )
+            answer_text = response.text
+        except Exception as e:
+            answer_text = f"[ERRORE API] {e}"
+
         return {
-            "answer":           response.content[0].text,
+            "answer":           answer_text,
             "retrieved_chunks": [c["title"] for c in retrieved]
         }
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # SYSTEM 3 — GRAPH RAG
@@ -176,27 +191,84 @@ class DocumentRAG:
 ONTOLOGY_DESCRIPTION = """
 PREFIX akg:  <http://antibiotickg.org/ontology#>
 PREFIX ares: <http://antibiotickg.org/resource/>
+PREFIX foaf: <http://xmlns.com/foaf/0.1/>
 
 Classes:
-  akg:Paper        — a scientific paper
-  akg:Author       — a researcher/author
-  akg:Institution  — a university or research centre
-  akg:Topic        — a research concept or topic
+  akg:Paper                 — a scientific paper
+  akg:Author                — a researcher/author (subClassOf foaf:Person)
+  akg:Institution           — a university or research centre
+  akg:AcademicInstitution   — subclass of Institution, type=education
+  akg:CompanyInstitution    — subclass of Institution, type=company
+  akg:NonprofitInstitution  — subclass of Institution, type=nonprofit
+  akg:Topic                 — a research concept or topic
+  akg:Country               — a country (ISO two-letter code)
 
 Object properties:
   akg:cites           (Paper → Paper)        — paper A cites paper B
+  akg:citedBy         (Paper → Paper)        — inverse of cites: paper A is cited by paper B
   akg:hasAuthor       (Paper → Author)        — paper has an author
   akg:affiliatedWith  (Author → Institution)  — author belongs to institution
   akg:about           (Paper → Topic)         — paper covers a topic
+  akg:locatedIn       (Institution → Country) — institution is located in country
+  akg:coAuthorWith    (Author → Author)       — symmetric: two authors co-wrote a paper together
 
 Datatype properties:
-  akg:hasTitle           (Paper        → xsd:string)
-  akg:hasYear            (Paper        → xsd:integer)
-  akg:hasCitationCount   (Paper        → xsd:integer)
-  akg:hasDOI             (Paper        → xsd:string)
-  akg:hasName            (Author       → xsd:string)
-  akg:hasInstitutionName (Institution  → xsd:string)
-  akg:hasTopicName       (Topic        → xsd:string)
+  akg:hasTitle            (Paper        → xsd:string)
+  akg:hasYear             (Paper        → xsd:integer)
+  akg:hasCitationCount    (Paper        → xsd:integer)
+  akg:hasDOI              (Paper        → xsd:string)
+  akg:hasPublicationType  (Paper        → xsd:string)   — e.g. article, review, book-chapter
+  akg:isOpenAccess        (Paper        → xsd:boolean)
+  akg:hasPrimaryTopic     (Paper        → xsd:string)   — main OpenAlex taxonomy topic
+  akg:hasName             (Author       → xsd:string)
+  akg:hasInstitutionName  (Institution  → xsd:string)
+  akg:hasCountryCode      (Country      → xsd:string)   — two-letter ISO code, e.g. US, IT
+  akg:hasTopicName        (Topic        → xsd:string)
+
+Notes:
+  - Use akg:citedBy directly instead of inverting akg:cites when the question
+    asks "who cites paper X" — both directions are materialized in the graph.
+  - Use akg:AcademicInstitution / akg:CompanyInstitution / akg:NonprofitInstitution
+    directly in the query's rdf:type when the question asks about a specific
+    institution type, instead of filtering on a separate type property.
+  - akg:coAuthorWith is symmetric: querying in either direction returns the
+    same pairs.
+  - IMPORTANT: questions often refer to a paper informally by first author's
+    surname and year (e.g. "the Stokes 2020 paper", "Smith et al. 2019") rather
+    than by its exact title. The graph does NOT contain such informal aliases —
+    only exact values extracted from OpenAlex (akg:hasTitle, akg:hasName,
+    akg:hasYear). NEVER try to match the informal reference against akg:hasTitle.
+    Instead, resolve it by author surname + year:
+      ?paper akg:hasAuthor ?author .
+      ?author akg:hasName ?authorName .
+      FILTER (CONTAINS(?authorName, "Stokes"))
+      ?paper akg:hasYear 2020 .
+    This correctly identifies the paper without guessing its title.
+
+Examples:
+  Question: "Who are the authors of the Stokes 2020 paper on antibiotic discovery?"
+  Correct query:
+    SELECT DISTINCT ?authorName WHERE {
+      ?paper akg:hasAuthor ?firstAuthor .
+      ?firstAuthor akg:hasName ?firstAuthorName .
+      FILTER (CONTAINS(?firstAuthorName, "Stokes"))
+      ?paper akg:hasYear 2020 .
+      ?paper akg:hasAuthor ?author .
+      ?author akg:hasName ?authorName .
+    }
+
+  Question: "Which institutions are affiliated with authors of the Smith 2019 paper?"
+  Correct query:
+    SELECT DISTINCT ?institutionName WHERE {
+      ?paper akg:hasAuthor ?namedAuthor .
+      ?namedAuthor akg:hasName ?name .
+      FILTER (CONTAINS(?name, "Smith"))
+      ?paper akg:hasYear 2019 .
+      ?paper akg:hasAuthor ?author .
+      ?author akg:affiliatedWith ?institution .
+      ?institution akg:hasInstitutionName ?institutionName .
+    }
+
 """
 
 class GraphRAG:
@@ -208,24 +280,28 @@ class GraphRAG:
 
     def generate_sparql(self, question: str) -> str:
         """Usa l'LLM per tradurre la domanda in una query SPARQL."""
-        response = client.messages.create(
-            model=MODEL,
-            max_tokens=MAX_TOKENS,
-            system=(
-                "You are a SPARQL expert. Given a question and an ontology schema, "
-                "generate a valid SPARQL SELECT query that answers the question. "
-                "Return ONLY the SPARQL query, no explanation, no markdown code blocks."
-            ),
-            messages=[{
-                "role": "user",
-                "content": (
+        try:
+            response = client.models.generate_content(
+                model=MODEL,
+                contents=(
                     f"Ontology schema:\n{ONTOLOGY_DESCRIPTION}\n\n"
                     f"Question: {question}\n\n"
                     "Generate the SPARQL query:"
+                ),
+                config=types.GenerateContentConfig(
+                    system_instruction=(
+                        "You are a SPARQL expert. Given a question and an ontology schema, "
+                        "generate a valid SPARQL SELECT query that answers the question. "
+                        "Return ONLY the SPARQL query, no explanation, no markdown code blocks."
+                    ),
+                    max_output_tokens=MAX_TOKENS,
+                    temperature=0,
+                    thinking_config=types.ThinkingConfig(thinking_budget=0),
                 )
-            }]
-        )
-        return response.content[0].text.strip()
+            )
+            return response.text.strip()
+        except Exception as e:
+            return f"[ERRORE API — impossibile generare SPARQL] {e}"
 
     def execute_sparql(self, query: str) -> list[dict]:
         """Esegue la query SPARQL sul grafo e restituisce i risultati."""
@@ -250,24 +326,28 @@ class GraphRAG:
             return f"SPARQL execution error: {sparql_results[0]['error']}"
 
         results_text = json.dumps(sparql_results[:20], indent=2)
-        response = client.messages.create(
-            model=MODEL,
-            max_tokens=MAX_TOKENS,
-            system=(
-                "You are a scientific assistant. Given structured query results "
-                "from a Knowledge Graph, provide a clear and concise natural language "
-                "answer to the original question. Use only the provided data."
-            ),
-            messages=[{
-                "role": "user",
-                "content": (
+        try:
+            response = client.models.generate_content(
+                model=MODEL,
+                contents=(
                     f"Question: {question}\n\n"
                     f"Query results:\n{results_text}\n\n"
                     "Answer:"
+                ),
+                config=types.GenerateContentConfig(
+                    system_instruction=(
+                        "You are a scientific assistant. Given structured query results "
+                        "from a Knowledge Graph, provide a clear and concise natural language "
+                        "answer to the original question. Use only the provided data."
+                    ),
+                    max_output_tokens=MAX_TOKENS,
+                    temperature=0,
+                    thinking_config=types.ThinkingConfig(thinking_budget=0),
                 )
-            }]
-        )
-        return response.content[0].text
+            )
+            return response.text
+        except Exception as e:
+            return f"[ERRORE API — impossibile verbalizzare] {e}"
 
     def answer(self, question: str) -> dict:
         """Pipeline completa: domanda → SPARQL → esecuzione → risposta."""
