@@ -363,6 +363,58 @@ class GraphRAG:
         }
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# SALVATAGGIO RISULTATI — usato sia da terminale che dall'interfaccia Streamlit
+# ═══════════════════════════════════════════════════════════════════════════════
+
+RESULTS_PATH = "results/live_results.json"
+
+def load_results() -> dict:
+    """Carica i risultati già salvati, se esistono."""
+    if os.path.exists(RESULTS_PATH):
+        with open(RESULTS_PATH, encoding="utf-8") as f:
+            return json.load(f)
+    return {}
+
+def save_result(question: str, doc_rag: "DocumentRAG", graph_rag: "GraphRAG",
+                 hop_level: str = "") -> dict:
+    """
+    Fa rispondere tutti e 3 i sistemi alla stessa domanda e salva il risultato
+    in results/live_results.json. Se la stessa identica domanda viene rifatta,
+    il risultato precedente viene sovrascritto (non duplicato).
+    """
+    os.makedirs("results", exist_ok=True)
+    results = load_results()
+
+    ans1 = system1_parametric_llm(question)
+    ans2 = doc_rag.answer(question)
+    ans3 = graph_rag.answer(question)
+
+    entry = {
+        "question":  question,
+        "hop_level": hop_level,
+        "system1": {
+            "answer": ans1
+        },
+        "system2": {
+            "answer":           ans2["answer"],
+            "retrieved_chunks": ans2["retrieved_chunks"]
+        },
+        "system3": {
+            "answer":         ans3["answer"],
+            "sparql_query":   ans3["sparql_query"],
+            "query_valid":    ans3["query_valid"],
+            "results_count":  ans3["results_count"]
+        }
+    }
+
+    results[question] = entry  # sovrascrive se la domanda esiste già
+
+    with open(RESULTS_PATH, "w", encoding="utf-8") as f:
+        json.dump(results, f, indent=2, ensure_ascii=False)
+
+    return entry
+
 # ── TEST RAPIDO ───────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     test_question = "Who are the authors of the Stokes 2020 paper on antibiotic discovery?"
