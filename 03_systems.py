@@ -34,7 +34,7 @@ PAPERS_PATH    = "data/papers.json"
 ABSTRACTS_PATH = "data/abstracts.json"
 
 # BGE-M3 commentato per velocità di sviluppo — MiniLM attivo come richiesto:
-# EMBED_MODEL = "BAAI/bge-m3"
+#EMBED_MODEL = "BAAI/bge-m3"
 EMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
 client = genai.Client(api_key=os.environ.get("GOOGLE_API_KEY"))
@@ -127,7 +127,7 @@ class DocumentRAG:
         print(f"  Calcolo embeddings per {len(self.chunks)} chunk...")
         texts = [c["text"] for c in self.chunks]
         self.embeddings = self.model.encode(texts, show_progress_bar=True,
-                                            convert_to_numpy=True)
+                                            convert_to_numpy=True, batch_size=4)
         print(f"  Indice costruito: shape {self.embeddings.shape}")
 
     def retrieve(self, question: str, top_k: int = 5) -> list[dict]:
@@ -151,9 +151,9 @@ class DocumentRAG:
 
         context = "\n\n".join([
             f"Paper: {c['title']}\n"
-            f"Authors: {', '.join(c['authors'][:3])}\n"
+            f"Authors: {', '.join(c['authors'])}\n"
             f"Year: {c.get('year', 'N/A')}\n"
-            + (f"Abstract: {c['abstract'][:500]}\n" if c.get('abstract') else "")
+            + (f"Abstract: {c['abstract'][:2000]}\n" if c.get('abstract') else "")
             + f"Topics: {', '.join(c.get('text','').split('Topics:')[-1].split(',')[:3]) if 'Topics:' in c.get('text','') else 'N/A'}"
             for c in retrieved
         ])
