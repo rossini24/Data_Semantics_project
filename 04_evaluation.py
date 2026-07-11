@@ -34,11 +34,23 @@ try:
     from ragas import evaluate
     from ragas.metrics import faithfulness, answer_relevancy
     from datasets import Dataset
+    import litellm
+    from ragas.llms import llm_factory
+
     HAS_RAGAS = True
     print("[INFO] RAGAS disponibile")
+
+    # Configurazione LLM per RAGAS: usa Gemini invece del default OpenAI,
+    # riusando la stessa GOOGLE_API_KEY già presente nel file .env
+    os.environ["GEMINI_API_KEY"] = os.environ.get("GOOGLE_API_KEY", "")
+    ragas_llm = llm_factory(
+        "gemini/gemini-2.0-flash",
+        provider="litellm",
+        client=litellm.completion,
+    )
 except ImportError:
     HAS_RAGAS = False
-    print("[WARN] RAGAS non installato — pip install ragas datasets")
+    print("[WARN] RAGAS non installato — pip install ragas datasets litellm")
 
 os.makedirs("results", exist_ok=True)
 
@@ -66,7 +78,7 @@ def compute_ragas(question: str, answer: str, contexts: list) -> dict:
             "answer":   [answer],
             "contexts": [contexts],
         })
-        result = evaluate(dataset, metrics=[faithfulness, answer_relevancy])
+        result = evaluate(dataset, metrics=[faithfulness, answer_relevancy], llm=ragas_llm)
         return {
             "faithfulness":     round(float(result["faithfulness"]), 3),
             "answer_relevancy": round(float(result["answer_relevancy"]), 3),
