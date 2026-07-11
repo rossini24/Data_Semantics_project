@@ -44,7 +44,7 @@ try:
     # riusando la stessa GOOGLE_API_KEY già presente nel file .env
     os.environ["GEMINI_API_KEY"] = os.environ.get("GOOGLE_API_KEY", "")
     ragas_llm = llm_factory(
-        "gemini/gemini-2.0-flash",
+        "gemini/gemini-2.5-flash",
         provider="litellm",
         client=litellm.completion,
     )
@@ -350,7 +350,7 @@ def run_evaluation():
 
         results.append(result)
 
-    with open("results/evaluation_results.json", "w") as f:
+    with open("results/evaluation_results.json", "w", encoding="utf-8") as f:
         json.dump(results, f, indent=2, ensure_ascii=False)
 
     with open("results/scores.csv", "w", newline="") as f:
