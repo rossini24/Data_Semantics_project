@@ -304,19 +304,34 @@ class GraphRAG:
             return f"[ERRORE API — impossibile generare SPARQL] {e}"
 
     def execute_sparql(self, query: str) -> list[dict]:
-        """Esegue la query SPARQL sul grafo e restituisce i risultati."""
-        try:
-            results = self.g.query(query)
-            rows = []
-            for row in results:
-                rows.append({
-                    str(var): str(val)
-                    for var, val in zip(results.vars, row)
-                    if val is not None
-                })
-            return rows
-        except Exception as e:
-            return [{"error": str(e)}]
+        """Esegue la query SPARQL sul grafo con timeout di 30 secondi."""
+        import threading
+        result_container = []
+        error_container = []
+
+        def run_query():
+            try:
+                results = self.g.query(query)
+                rows = []
+                for row in results:
+                    rows.append({
+                        str(var): str(val)
+                        for var, val in zip(results.vars, row)
+                        if val is not None
+                    })
+                result_container.extend(rows)
+            except Exception as e:
+                error_container.append(str(e))
+
+        thread = threading.Thread(target=run_query)
+        thread.start()
+        thread.join(timeout=30)
+
+        if thread.is_alive():
+            return [{"error": "SPARQL query timed out after 30 seconds"}]
+        if error_container:
+            return [{"error": error_container[0]}]
+        return result_container
 
     def verbalize(self, question: str, sparql_results: list[dict]) -> str:
         """Verbalizza i risultati SPARQL in linguaggio naturale."""
