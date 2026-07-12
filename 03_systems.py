@@ -325,7 +325,7 @@ class GraphRAG:
 
         thread = threading.Thread(target=run_query)
         thread.start()
-        thread.join(timeout=30)
+        thread.join(timeout=90)
 
         if thread.is_alive():
             return [{"error": "SPARQL query timed out after 30 seconds"}]
