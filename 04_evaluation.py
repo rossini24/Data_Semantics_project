@@ -44,9 +44,9 @@ try:
     # riusando la stessa GOOGLE_API_KEY già presente nel file .env
     os.environ["GEMINI_API_KEY"] = os.environ.get("GOOGLE_API_KEY", "")
     ragas_llm = llm_factory(
-        "gemini/gemini-2.5-flash",
-        provider="litellm",
-        client=litellm.completion,
+    "gemini/gemini-2.5-flash",
+    provider="litellm",
+    client=litellm.completion,
     )
 except ImportError:
     HAS_RAGAS = False
@@ -189,100 +189,164 @@ QUESTIONS = [
 
     # ══════════════════════════════════════════════════════════════════════════
     # COMPARISON — 1 HOP
-    # Confronti diretti su proprietà del grafo. Le risposte non sono
-    # ovvie a priori — questo è il punto: testare se i sistemi riescono
-    # a ragionare su aggregazioni di dati strutturati.
+    # Confronti diretti su proprietà del grafo, senza attraversare relazioni
+    # (anno, publication type, primary topic — proprietà singole del Paper).
     # ══════════════════════════════════════════════════════════════════════════
     {
         "id": "C1_01", "hop": 1, "type": "comparison",
-        "question": "Do review papers in the dataset have on average more or fewer citations than article papers?",
-        "ground_truth": "Review papers have on average more citations (242.5) than article papers (203.7)"
+        "question": "Do papers published in 2020 or earlier have a higher or lower average citation count than papers published after 2020?",
+        "ground_truth": "Papers published in 2020 or earlier have a much higher average citation count (339.48, n=42) than papers published after 2020 (214.73, n=558) — older papers have had more time to accumulate citations."
     },
     {
         "id": "C1_02", "hop": 1, "type": "comparison",
-        "question": "Do open access papers in the dataset have on average more or fewer citations than non-open access papers?",
-        "ground_truth": "Open access and non-open access papers have almost the same average citations (221.6 vs 228.9), with non-OA papers slightly higher — contrary to what one might expect"
+        "question": "Do papers published in 2023 have a higher or lower average citation count than papers published in 2024?",
+        "ground_truth": "Papers published in 2023 have a slightly higher average citation count (219.97, n=181) than papers published in 2024 (207.14, n=140)."
     },
     {
         "id": "C1_03", "hop": 1, "type": "comparison",
-        "question": "Do most authors in the dataset collaborate exclusively with co-authors from the same institution, or do they have cross-institution collaborations?",
-        "ground_truth": "Among the 4657 authors in the dataset, 40 have no co-authors at all (sole authors). Of the remaining 4617 authors with at least one co-author, the vast majority (3952, 84.9% of all authors) have at least one co-author from a different institution. Only 665 authors (14.3%) collaborate exclusively within their own institution — indicating that cross-institutional collaboration is the dominant pattern in this research network."
+        "question": "Are papers on \"Computational Drug Discovery Methods\" more or less likely to be open access than papers on \"Artificial Intelligence in Healthcare and Education\"?",
+        "ground_truth": "Papers on \"Artificial Intelligence in Healthcare and Education\" are more likely to be open access (93.4%, 57/61) than papers on \"Computational Drug Discovery Methods\" (74.5%, 76/102)."
     },
 
     # ══════════════════════════════════════════════════════════════════════════
     # COMPARISON — 2 HOP
-    # Confronti che richiedono prima di costruire due insiemi attraverso
-    # una relazione, poi di confrontarli su una proprietà.
+    # Confronti che attraversano una relazione (Paper → Author → Institution /
+    # Country) prima di aggregare. Categorie non mutuamente esclusive — vedi
+    # le percentuali di sovrapposizione riportate nei singoli ground_truth.
     # ══════════════════════════════════════════════════════════════════════════
     {
         "id": "C2_01", "hop": 2, "type": "comparison",
-        "question": "Do papers with authors from 3 or more different countries tend to have more citations than papers with authors from a single country?",
-        "ground_truth": "Yes — papers with authors from 3 or more countries have on average more citations (268.4) than papers with authors from a single country (205.9)"
+        "question": "Do papers with ≥1 author from an academic institution have higher/lower avg citations than papers with ≥1 author from a company institution?",
+        "ground_truth": "Papers with a company-affiliated author have a slightly higher average citation count (253.95, n=86) than papers with an academic-affiliated author (223.03, n=571). Note: categories are not mutually exclusive — 91.9% of company-affiliated papers also have an academic-affiliated author."
     },
     {
         "id": "C2_02", "hop": 2, "type": "comparison",
-        "question": "Are there more papers with authors from academic institutions or papers with authors from company institutions among those with 3 or more authors?",
-        "ground_truth": "Academic institution papers (495) greatly outnumber company institution papers (81) among papers with 3 or more authors"
+        "question": "Are papers with ≥1 company-affiliated author more/less likely to be open access than papers with ≥1 academic-affiliated author?",
+        "ground_truth": "Company-affiliated papers are more likely to be open access (81.4%, 70/86) than academic-affiliated papers (73.9%, 422/571). Note: categories are not mutually exclusive — 91.9% of company-affiliated papers also have an academic-affiliated author."
+    },
+    {
+        "id": "C2_03", "hop": 2, "type": "comparison",
+        "question": "Do papers with ≥1 academic-affiliated author have higher/lower avg citations than papers with ≥1 nonprofit-affiliated author?",
+        "ground_truth": "Nonprofit-affiliated papers have a notably higher average citation count (323.64, n=74) than academic-affiliated papers (223.03, n=571). Note: categories are not mutually exclusive — 98.6% of nonprofit-affiliated papers also have an academic-affiliated author."
+    },
+    {
+        "id": "C2_04", "hop": 2, "type": "comparison",
+        "question": "Do papers with ≥1 US-affiliated author have higher/lower avg citations than papers with ≥1 China-affiliated author?",
+        "ground_truth": "US-affiliated papers have a higher average citation count (280.43, n=244) than China-affiliated papers (213.12, n=176). Note: categories are not mutually exclusive — 21.7% of US-affiliated papers also have a China-affiliated author, and 30.1% of China-affiliated papers also have a US-affiliated author."
+    },
+    {
+        "id": "C2_05", "hop": 2, "type": "comparison",
+        "question": "Are papers with ≥1 US-affiliated author more/less likely to be open access than papers with ≥1 China-affiliated author?",
+        "ground_truth": "US-affiliated papers are much more likely to be open access (77.0%, 188/244) than China-affiliated papers (54.0%, 95/176). Note: same non-mutual-exclusivity caveat as C2_04."
     },
 
     # ══════════════════════════════════════════════════════════════════════════
     # COMPARISON — 3 HOP
-    # Confronti che attraversano 3 relazioni prima di confrontare.
+    # Confronti con filtro combinato (istituzione + paese) o join più lungo
+    # (topic → autore → istituzione → paese) prima di aggregare.
     # ══════════════════════════════════════════════════════════════════════════
     {
         "id": "C3_01", "hop": 3, "type": "comparison",
-        "question": "Which has more distinct author countries: papers covering the topic of drug discovery or papers covering artificial intelligence?",
-        "ground_truth": "Papers on artificial intelligence involve authors from more countries (58) than papers on drug discovery (43)"
+        "question": "Among papers with ≥1 company-affiliated author, do US-based ones have higher/lower avg citations than China-based ones?",
+        "ground_truth": "Among company-affiliated papers, China-based ones have a higher average citation count (448.67, n=15) than US-based ones (339.62, n=45) — note: small China subsample (n=15), and 40% of it overlaps with the US-based group (mixed-affiliation papers)."
     },
     {
         "id": "C3_02", "hop": 3, "type": "comparison",
-        "question": "Among papers that directly cite Stokes 2020, are there more papers that are also cited by other papers in the dataset, or papers that receive no citations from within the dataset?",
-        "ground_truth": "Among the 206 papers directly citing Stokes 2020, 125 are also cited by other papers within the dataset, while 81 receive no internal citations — meaning the majority of hop-1 papers are embedded in the broader citation network, not just leaves"
-    },
-    {
-        "id": "C3_03", "hop": 3, "type": "comparison",
-        "question": "Which has more distinct institutions: papers at hop-1 or papers at hop-2 distance from Stokes 2020?",
-        "ground_truth": "Hop-2 papers have more distinct institutions (1339) than hop-1 papers (654)"
-    },
-    {
-        "id": "C3_04", "hop": 3, "type": "comparison",
-        "question": "Among papers citing Stokes 2020, are there more papers with single-institution authorship or multi-institution authorship?",
-        "ground_truth": "Multi-institution papers (155) greatly outnumber single-institution papers (48) among papers citing Stokes 2020"
-    },
-    {
-        "id": "C3_05", "hop": 3, "type": "comparison",
-        "question": "Do papers with more than 10 authors tend to be articles or reviews, and does this pattern hold for papers with fewer than 5 authors?",
-        "ground_truth": "Papers with more than 10 authors are predominantly articles (70) over reviews (29). For papers with fewer than 5 authors, the pattern reverses: reviews (124) outnumber articles (98) — suggesting that large collaborative works favour the article format while smaller-team contributions more often take the review format"
+        "question": "Do papers about \"Antibiotics\" involve authors from more distinct countries than papers about \"Nanotechnology\"?",
+        "ground_truth": "Papers about \"Antibiotics\" involve authors from 38 distinct countries, versus 21 for papers about \"Nanotechnology\"."
     },
 
     # ══════════════════════════════════════════════════════════════════════════
-    # NARRATIVE — valutate con RAGAS + manuale
-    # 2 hop-1, 3 hop-2
+    # NARRATIVE — 1 HOP
+    # Ancorate a un singolo paper con abstract verificato, domanda su un solo
+    # fatto/aspetto discorsivo.
     # ══════════════════════════════════════════════════════════════════════════
     {
-        "id": "N_01", "hop": 1, "type": "narrative",
-        "question": "Why is the Stokes 2020 paper considered a landmark in computational drug discovery?",
-        "ground_truth": "The Stokes 2020 paper is considered a landmark because it was the first to use a deep learning model trained on molecular properties to screen over 100 million compounds and identify halicin — a structurally novel antibiotic with broad-spectrum activity against drug-resistant pathogens including M. tuberculosis and A. baumannii. The approach demonstrated that AI could discover antibiotics with mechanisms distinct from existing drugs."
-    },
-    {
-        "id": "N_02", "hop": 1, "type": "narrative",
+        "id": "N1_01", "hop": 1, "type": "narrative",
         "question": "What limitation of machine learning models does the paper 'Exposing the Limitations of Molecular Machine Learning with Activity Cliffs' identify when predicting molecular bioactivity?",
-        "ground_truth": "The paper identifies 'activity cliffs' — pairs of structurally similar molecules with very different potency — as a key limitation. All 24 methods tested struggle with these cases, and descriptor-based methods outperform more complex deep learning models on this specific challenge."
+        "ground_truth": "The paper shows that machine and deep learning models struggle to accurately predict potency for activity cliffs (pairs of structurally similar molecules with large potency differences). Benchmarking 24 approaches on 30 targets, it found that all methods struggled on activity cliffs, with descriptor-based ML approaches actually outperforming more complex deep learning methods — motivating the MoleculeACE benchmarking platform and dedicated activity-cliff-aware evaluation metrics."
     },
     {
-        "id": "N_03", "hop": 2, "type": "narrative",
+        "id": "N1_02", "hop": 1, "type": "narrative",
+        "question": "According to the paper on predicting antimicrobial resistance from whole-genome sequencing, which four machine learning methods did the researchers compare, and for which four antibiotics?",
+        "ground_truth": "Logistic regression, support vector machine, random forest, and convolutional neural network, evaluated for predicting resistance to ciprofloxacin, cefotaxime, ceftazidime, and gentamicin."
+    },
+    {
+        "id": "N1_03", "hop": 1, "type": "narrative",
+        "question": "According to the paper on ARTS 2.0, what genome mining strategy does the tool use to prioritize promising biosynthetic gene clusters for novel antibiotics?",
+        "ground_truth": "ARTS uses a target-directed genome mining approach: it predicts the likely mode of action of a compound encoded by an uncharacterized biosynthetic gene cluster based on the presence of resistance target genes within or near that cluster, helping prioritize clusters encoding antibiotics with novel modes of action."
+    },
+    {
+        "id": "N1_04", "hop": 1, "type": "narrative",
+        "question": "According to the paper introducing GraphINVENT, which of the six graph neural network-based generative models tested performed best against the benchmark metrics?",
+        "ground_truth": "The gated-graph neural network performed best among the six GNN-based generative models compared, benchmarked using the MOSES distribution-based metrics."
+    },
+    {
+        "id": "N1_05", "hop": 1, "type": "narrative",
+        "question": "Among papers that cite Stokes 2020, are generative/molecular-design approaches or docking/virtual-screening approaches more common as a follow-on methodology?",
+        "ground_truth": "Generative/molecular-design approaches are markedly more common: 29 of the 146 citing papers with abstracts reference generative or latent-space design methods, versus 13 referencing docking or virtual screening — more than double."
+    },
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # NARRATIVE — 2 HOP
+    # Singolo paper, ma la domanda combina due fatti/aspetti dello stesso
+    # abstract (metodo + localizzazione, causa + soluzione, due valori numerici).
+    # ══════════════════════════════════════════════════════════════════════════
+    {
+        "id": "N2_01", "hop": 2, "type": "narrative",
+        "question": "Why do \"activity cliffs\" pose a particular challenge for machine learning models predicting molecular bioactivity, according to the paper that discusses them?",
+        "ground_truth": "Activity cliffs are pairs of molecules that are highly similar in structure but show large differences in potency. Because ML/DL models largely rely on structural similarity to predict activity, these cases break the usual similarity-property assumption, causing models to underperform on them specifically — the paper found this true across all 24 tested approaches on 30 targets, with simpler descriptor-based methods outperforming deep learning on these edge cases."
+    },
+    {
+        "id": "N2_02", "hop": 2, "type": "narrative",
+        "question": "According to the paper titled \"Potent antibiotic design via guided search from antibacterial activity evaluations,\" what method does it propose to generate new antibiotic candidates, and in which country are its authors' institutions located?",
+        "ground_truth": "The paper proposes MDAGS (Molecular Design via Attribute-Guided Search), which builds an antibacterial-activity latent space and guides optimization of compounds within it to generate novel candidates with strong antibacterial activity, without requiring extensive costly experimental evaluation. All authors' institutions are located in China (Xidian University)."
+    },
+    {
+        "id": "N2_03", "hop": 2, "type": "narrative",
+        "question": "According to the paper titled \"Benchmarking AlphaFold-enabled molecular docking predictions for antibiotic discovery,\" why did the initial docking approach show weak performance, and what technique did the researchers use to improve it?",
+        "ground_truth": "The initial AlphaFold2-based docking approach performed weakly (average auROC of 0.48) due to widespread promiscuity among the tested proteins and compounds. Performance was improved by rescoring docking poses with machine learning-based approaches, reaching average auROCs as high as 0.63, with ensembles of rescoring functions further improving prediction accuracy and the true-positive-to-false-positive ratio."
+    },
+    {
+        "id": "N2_04", "hop": 2, "type": "narrative",
+        "question": "According to the paper titled \"Predicting cell-penetrating peptides using machine learning algorithms and navigating in their chemical space,\" what accuracy did the proposed method (BChemRF-CPPred) achieve on the PDB-based test, and how does this compare to the FASTA-based test?",
+        "ground_truth": "BChemRF-CPPred achieved 90.66% accuracy (AUC = 0.9365) on the PDB-based independent test, versus 86.5% accuracy (AUC = 0.9216) on the FASTA-based independent test — the PDB-based (structure-based) input outperformed the FASTA-based (sequence-only) input."
+    },
+    {
+        "id": "N2_05", "hop": 2, "type": "narrative",
         "question": "Based on their abstracts, what methodological approaches do papers citing Stokes 2020 use to extend or improve upon the original work?",
-        "ground_truth": "Papers citing Stokes 2020 extend the work through: graph neural networks for molecular design, generative AI for de novo drug design, large language models and foundation models applied to chemistry, multi-task learning across multiple molecular properties, and active learning to reduce experimental costs."
+        "ground_truth": "Across all 146 citing papers with available abstracts, the most common methodological threads are: generative/latent-space molecular design (29 papers, e.g. MDAGS W4318392954, GraphINVENT W3107551345), natural-product-based approaches (14, e.g. plant flavonoids W3164905478), docking/virtual screening (13, e.g. AlphaFold-enabled docking W4294719209), peptide-based discovery (12, e.g. AMPSphere W4399367032), genomics/metagenomics-driven approaches (11, e.g. whole-genome AMR prediction W3203901993, ARTS 2.0 genome mining W3026412036), and smaller clusters on graph neural networks (8), explainable AI (8), and open-source property-prediction toolkits (7, e.g. Chemprop, DeepPurpose, ADMETlab 3.0). Generative/design-based work is the single largest follow-on category, more than double the next most common approach."
     },
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # NARRATIVE — 3 HOP
+    # Sintesi tra più paper del network citazionale (o un singolo paper con
+    # contenuto più articolato), non un singolo fatto isolato.
+    # ══════════════════════════════════════════════════════════════════════════
     {
-        "id": "N_04", "hop": 2, "type": "narrative",
-        "question": "According to papers that cite Stokes 2020, what makes antimicrobial resistance prediction via machine learning particularly challenging?",
-        "ground_truth": "Key challenges include: scarcity and quality of labelled training data, difficulty generalising models to new pathogens, limited interpretability of deep learning models, and the gap between in silico predictions and clinical efficacy."
-    },
-    {
-        "id": "N_05", "hop": 2, "type": "narrative",
+        "id": "N3_01", "hop": 3, "type": "narrative",
         "question": "Based on papers in the citation network around Stokes 2020, what are the main strategies researchers propose to combat antimicrobial resistance beyond deep learning-based antibiotic discovery?",
-        "ground_truth": "Complementary strategies discussed in the citation network include the One Health approach (coordinating human, animal and environmental health), nanomaterials and nanocarriers as drug delivery systems, and targeting bacterial persisters — all going beyond the ML-based screening approach of Stokes 2020."
+        "ground_truth": "Across all 146 citing papers with abstracts, non-DL strategies cluster into: natural-product-derived antibacterials (14 papers — plant flavonoids W3164905478, a 459-compound ethnobotanical review W3099939732); genome mining for resistance-conferring gene clusters as a route to new antibiotics rather than prediction (ARTS 2.0, W3026412036); targeting resistance mechanisms directly via efflux pump inhibitors (3 papers, W4377970794); clinical/translational strategies — antimicrobial stewardship using electronic health record data (W3127516550); and broader policy-level alternatives — narrow-spectrum drugs, bacteriophage therapy (3 papers), monoclonal antibodies, vaccines (2 papers), and improved diagnostics (9 papers, W4291020097)."
+    },
+    {
+        "id": "N3_02", "hop": 3, "type": "narrative",
+        "question": "Across papers that cite Stokes 2020 and focus on genomic approaches to antimicrobial resistance, what different strategies do they use — predicting resistance directly from sequence data versus mining genomes for resistance-conferring gene clusters?",
+        "ground_truth": "Two distinct genomic strategies appear: (1) direct AMR prediction from whole-genome sequencing using classifiers such as LR, SVM, RF and CNN trained on genomic encodings, aiming to replace slow phenotypic susceptibility testing (W3203901993); and (2) target-directed genome mining (ARTS 2.0, W3026412036), which instead searches genomes for biosynthetic gene clusters carrying their own resistance genes to prioritize discovery of new antibiotics with novel mechanisms. The first predicts resistance in known pathogens; the second discovers new antibiotic candidates via bacterial self-resistance genes. A third review (W3127516550) frames ML-for-AMR across three domains: genomic prediction, mechanism-of-action discovery, and antimicrobial stewardship using electronic health record data."
+    },
+    {
+        "id": "N3_03", "hop": 3, "type": "narrative",
+        "question": "Do any papers that cite Stokes 2020 raise concerns about the interpretability of deep learning models, and if so, in which research contexts?",
+        "ground_truth": "Yes. A review on interpreting deep neural networks for psychiatric research (W3094739916) explicitly frames DNNs as a 'black box' needing better interpretability tools, applying this concern outside drug discovery entirely. A broader integrative review of deep learning in drug discovery (W4309490745) separately discusses how explainable AI supports drug discovery problems. Both treat interpretability as an open challenge for deep learning generally, citing Stokes 2020 as a landmark example rather than addressing its interpretability directly."
+    },
+    {
+        "id": "N3_04", "hop": 3, "type": "narrative",
+        "question": "Beyond antibiotic and drug discovery, in what other scientific domain does one of the papers citing Stokes 2020 apply a similar machine learning paradigm, and for what purpose?",
+        "ground_truth": "The Self-Driving Laboratories review (W4401535000) cites Stokes 2020 while discussing automated, ML-guided experimental discovery, extending the same 'let a model guide which candidates to test experimentally' paradigm from antibiotic discovery to materials science and chemistry more broadly, via autonomous experimental platforms."
+    },
+    {
+        "id": "N3_05", "hop": 3, "type": "narrative",
+        "question": "According to the review on machine learning applications to antimicrobial resistance as an emerging model for translational research, what three domains of ML-AMR research does it identify?",
+        "ground_truth": "(1) Prediction of AMR using genomic data; (2) use of ML to gain insight into the cellular functions disrupted by antibiotics, underpinning mechanism-of-action discovery; (3) application of ML for antimicrobial stewardship using data extracted from electronic health records."
     },
 ]
 
@@ -353,7 +417,7 @@ def run_evaluation():
     with open("results/evaluation_results.json", "w", encoding="utf-8") as f:
         json.dump(results, f, indent=2, ensure_ascii=False)
 
-    with open("results/scores.csv", "w", newline="") as f:
+    with open("results/scores.csv", "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         writer.writerow([
             "id", "hop", "type", "question",
