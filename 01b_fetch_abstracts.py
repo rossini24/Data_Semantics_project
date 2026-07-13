@@ -16,7 +16,7 @@ import json
 import time
 import os
 
-EMAIL    = "la_tua_email@campus.unimib.it"  # CAMBIA con la tua email reale
+EMAIL    = "l.rossini17@campus.unimib.it"  # CAMBIA con la tua email reale
 BASE_URL = "https://api.openalex.org"
 HEADERS  = {"User-Agent": f"AntibioticKG-RAG/1.0 (mailto:{EMAIL})"}
 
@@ -42,7 +42,7 @@ def fetch_abstracts():
     print("AntibioticKG-RAG — Fetch abstract da OpenAlex")
     print("=" * 60)
 
-    with open("data/papers.json") as f:
+    with open("data/papers.json", encoding="utf-8") as f:
         papers = json.load(f)
 
     abstracts = {}
@@ -70,7 +70,7 @@ def fetch_abstracts():
 
         time.sleep(0.2)  # rispetta rate limit
 
-    with open("data/abstracts.json", "w") as f:
+    with open("data/abstracts.json", "w", encoding="utf-8") as f:
         json.dump(abstracts, f, indent=2, ensure_ascii=False)
 
     available = sum(1 for v in abstracts.values() if v)
