@@ -328,7 +328,7 @@ class GraphRAG:
         thread.join(timeout=30)
 
         if thread.is_alive():
-            return [{"error": "SPARQL query timed out after 30 seconds"}]
+            return [{"error": "SPARQL query timed out after 30 seconds"}]   
         if error_container:
             return [{"error": error_container[0]}]
         return result_container
