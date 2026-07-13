@@ -25,6 +25,13 @@ except ImportError:
     print("       Installa con: pip install matplotlib")
 
 
+def parse_correct(val):
+    if val is None:
+        return None
+    v = str(val).strip()
+    return None if v in ("", "-1") else int(v)
+
+
 def analyze():
     print("=" * 60)
     print("AntibioticKG-RAG — Analisi risultati")
@@ -42,7 +49,7 @@ def analyze():
         return
 
     # ── METRICHE PER HOP ──────────────────────────────────────────────────────
-    hop_data = defaultdict(lambda: {"sys1": [], "sys2": [], "sys3": [], "sparql_valid": []})
+    type_hop_data = defaultdict(lambda: {"sys1": [], "sys2": [], "sys3": [], "sparql_valid": []})
 
     total_sys1_correct = 0
     total_sys2_correct = 0
@@ -51,15 +58,20 @@ def analyze():
 
     for row in rows:
         hop = int(row["hop"])
-        s1  = int(row["sys1_correct"]) if row["sys1_correct"] else 0
-        s2  = int(row["sys2_correct"]) if row["sys2_correct"] else 0
-        s3  = int(row["sys3_correct"]) if row["sys3_correct"] else 0
-        sv  = int(row["sys3_query_valid"]) if row["sys3_query_valid"] else 0
 
-        hop_data[hop]["sys1"].append(s1)
-        hop_data[hop]["sys2"].append(s2)
-        hop_data[hop]["sys3"].append(s3)
-        hop_data[hop]["sparql_valid"].append(sv)
+
+        s1 = parse_correct(row["sys1_correct"])
+        s2 = parse_correct(row["sys2_correct"])
+        s3 = parse_correct(row["sys3_correct"])
+        if s1 is None or s2 is None or s3 is None:
+            continue  # riga non ancora valutata, esclusa dai conteggi
+        sv  = 1 if str(row["sys3_query_valid"]).strip().lower() in ("1", "true") else 0
+
+        qtype = row["type"]
+        type_hop_data[(qtype, hop)]["sys1"].append(s1)
+        type_hop_data[(qtype, hop)]["sys2"].append(s2)
+        type_hop_data[(qtype, hop)]["sys3"].append(s3)
+        type_hop_data[(qtype, hop)]["sparql_valid"].append(sv)
 
         total_sys1_correct += s1
         total_sys2_correct += s2
@@ -67,35 +79,33 @@ def analyze():
         total_sparql_valid += sv
 
     n = len(rows)
-
-    # ── TABELLA RIASSUNTIVA ───────────────────────────────────────────────────
     print("\n── ACCURATEZZA GLOBALE ──────────────────────────────────")
     print(f"  System 1 (LLM puro)  : {total_sys1_correct}/{n} = {total_sys1_correct/n*100:.1f}%")
     print(f"  System 2 (Doc RAG)   : {total_sys2_correct}/{n} = {total_sys2_correct/n*100:.1f}%")
     print(f"  System 3 (Graph RAG) : {total_sys3_correct}/{n} = {total_sys3_correct/n*100:.1f}%")
     print(f"  SPARQL validity      : {total_sparql_valid}/{n} = {total_sparql_valid/n*100:.1f}%")
+    # ── TABELLA RIASSUNTIVA ──────────────────────────────────────────────────
+    print("\n── ACCURATEZZA PER TIPO E HOP (RQ2, corretta) ────────────")
+    print("  Bridge, comparison e narrative hanno hop con significati diversi:")
+    print("  per bridge è profondità di join SPARQL, per comparison/narrative")
+    print("  è complessità concettuale — mescolarli in una sola curva è fuorviante.\n")
 
-    print("\n── ACCURATEZZA PER HOP ──────────────────────────────────")
-    print(f"  {'Hop':<6} {'N':<5} {'Sys1':<12} {'Sys2':<12} {'Sys3':<12} {'SPARQL valid'}")
-    print(f"  {'-'*60}")
+    types_present = sorted(set(t for (t, h) in type_hop_data.keys()))
 
-    hops = sorted(hop_data.keys())
-    hop_acc = {"sys1": [], "sys2": [], "sys3": []}
-
-    for hop in hops:
-        d   = hop_data[hop]
-        n_h = len(d["sys1"])
-        a1  = sum(d["sys1"]) / n_h if n_h else 0
-        a2  = sum(d["sys2"]) / n_h if n_h else 0
-        a3  = sum(d["sys3"]) / n_h if n_h else 0
-        sv  = sum(d["sparql_valid"]) / n_h if n_h else 0
-
-        hop_acc["sys1"].append(a1)
-        hop_acc["sys2"].append(a2)
-        hop_acc["sys3"].append(a3)
-
-        print(f"  {hop:<6} {n_h:<5} {a1*100:>6.1f}%      {a2*100:>6.1f}%      {a3*100:>6.1f}%      {sv*100:.1f}%")
-
+    for qtype in types_present:
+        print(f"  ── {qtype.upper()} ──")
+        print(f"  {'Hop':<6} {'N':<5} {'Sys1':<12} {'Sys2':<12} {'Sys3':<12} {'SPARQL valid'}")
+        print(f"  {'-'*60}")
+        hops_this_type = sorted(h for (t, h) in type_hop_data.keys() if t == qtype)
+        for hop in hops_this_type:
+            d = type_hop_data[(qtype, hop)]
+            n_h = len(d["sys1"])
+            a1 = sum(d["sys1"]) / n_h if n_h else 0
+            a2 = sum(d["sys2"]) / n_h if n_h else 0
+            a3 = sum(d["sys3"]) / n_h if n_h else 0
+            sv = sum(d["sparql_valid"]) / n_h if n_h else 0
+            print(f"  {hop:<6} {n_h:<5} {a1*100:>6.1f}%      {a2*100:>6.1f}%      {a3*100:>6.1f}%      {sv*100:.1f}%")
+        print()
     # ── ANALISI ERRORI ────────────────────────────────────────────────────────
     error_counts = {
         "sys1": defaultdict(int),
@@ -117,28 +127,43 @@ def analyze():
         else:
             print("    (nessun errore classificato ancora)")
 
-    # ── GRAFICO ACCURATEZZA VS HOP ────────────────────────────────────────────
+    
+    # ── GRAFICI ACCURATEZZA VS HOP — UNO PER TIPO ─────────────────────────────
     if HAS_MATPLOTLIB:
-        fig, ax = plt.subplots(figsize=(8, 5))
-        hop_labels = [f"Hop {h}" for h in hops]
+        colors = {"sys1": "#C0392B", "sys2": "#2980B9", "sys3": "#1C5D5E"}
+        labels = {"sys1": "System 1 — Parametric LLM",
+                  "sys2": "System 2 — Document RAG",
+                  "sys3": "System 3 — Graph RAG"}
+        markers = {"sys1": "o", "sys2": "s", "sys3": "^"}
 
-        ax.plot(hop_labels, [v*100 for v in hop_acc["sys1"]],
-                marker="o", label="System 1 — Parametric LLM", color="#C0392B", linewidth=2)
-        ax.plot(hop_labels, [v*100 for v in hop_acc["sys2"]],
-                marker="s", label="System 2 — Document RAG", color="#2980B9", linewidth=2)
-        ax.plot(hop_labels, [v*100 for v in hop_acc["sys3"]],
-                marker="^", label="System 3 — Graph RAG", color="#1C5D5E", linewidth=2)
+        n_types = len(types_present)
+        fig, axes = plt.subplots(1, n_types, figsize=(6 * n_types, 5), squeeze=False)
+        axes = axes[0]
 
-        ax.set_xlabel("Hop Depth", fontsize=12)
-        ax.set_ylabel("Accuracy (%)", fontsize=12)
-        ax.set_title("Accuracy vs Hop Depth — AntibioticKG-RAG", fontsize=13)
-        ax.set_ylim(0, 105)
-        ax.legend(fontsize=10)
-        ax.grid(True, alpha=0.3)
+        for ax, qtype in zip(axes, types_present):
+            hops_this_type = sorted(h for (t, h) in type_hop_data.keys() if t == qtype)
+            hop_labels = [f"Hop {h}" for h in hops_this_type]
 
+            for sys in ["sys1", "sys2", "sys3"]:
+                accs = []
+                for hop in hops_this_type:
+                    d = type_hop_data[(qtype, hop)]
+                    n_h = len(d[sys])
+                    accs.append(sum(d[sys]) / n_h * 100 if n_h else 0)
+                ax.plot(hop_labels, accs, marker=markers[sys], label=labels[sys],
+                        color=colors[sys], linewidth=2)
+
+            ax.set_xlabel("Hop Depth", fontsize=11)
+            ax.set_ylabel("Accuracy (%)", fontsize=11)
+            ax.set_title(qtype.capitalize(), fontsize=12)
+            ax.set_ylim(0, 105)
+            ax.grid(True, alpha=0.3)
+
+        axes[0].legend(fontsize=9, loc="upper right")
+        fig.suptitle("Accuracy vs Hop Depth, by question type — AntibioticKG-RAG", fontsize=13)
         plt.tight_layout()
         plt.savefig("results/accuracy_vs_hop.png", dpi=150)
-        print("\n  Grafico salvato: results/accuracy_vs_hop.png")
+        print("\n  Grafico salvato: results/accuracy_vs_hop.png (un pannello per tipo)")
         plt.close()
     else:
         print("\n  [INFO] Installa matplotlib per generare il grafico automaticamente.")
