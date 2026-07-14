@@ -1,112 +1,241 @@
-# AntibioticKG-RAG
+# AntibioticKG-RAG: Graph RAG vs Document RAG vs Parametric LLM
 
-Graph RAG vs Document RAG vs Parametric LLM  
-Question Answering su reti di citazioni scientifiche — dominio: scoperta di antibiotici  
-Corso: Data Semantics 25/26
+Knowledge Graph + Graph RAG pipeline for question answering over a scientific citation network, comparing three QA architectures — parametric LLM, Document RAG, and Graph RAG — on the antibiotic discovery domain.
 
----
+## Overview
 
-## Struttura del progetto
+This project investigates how representing a citation network as a **Knowledge Graph (KG)** changes what can be reliably queried and answered compared to raw text retrieval or a model's parametric memory alone.
 
-```
-antibiotic_kg_rag/
-├── 01_collect_data.py      # Raccolta dati da OpenAlex
-├── 01b_fetch_abstracts.py  # Fetch abstract completi (esegui dopo 01)
-├── 02_build_kg.py          # Costruzione Knowledge Graph RDF
-├── 03_systems.py           # I tre sistemi di QA
-├── 04_evaluation.py        # Confronto sulle 30 domande
-├── 05_analyze.py           # Analisi risultati e grafico finale
-├── data/                   # Creata da script 01
-└── results/                # Creata da script 04
-```
+Using citation data seeded from Stokes et al. (2020), *A Deep Learning Approach to Antibiotic Discovery*, we:
+
+- Build an OWL/RDF Knowledge Graph from OpenAlex citation data
+- Apply OWL reasoning and materialize inferred triples (inverse/symmetric properties, subclassing)
+- Support three independent QA systems:
+  - **Parametric LLM** (no external grounding — baseline)
+  - **Document RAG** (dense retrieval over paper abstracts)
+  - **Graph RAG** (Text-to-SPARQL over the inferred KG)
+- Evaluate all three on a 40-question, hop-graded benchmark
 
 ---
 
-## Setup
+## Research Questions
 
-```bash
-pip install requests rdflib anthropic sentence-transformers numpy matplotlib
-export ANTHROPIC_API_KEY=sk-...
+1. To what extent does a Knowledge Graph representation of citation data improve QA accuracy compared to Document RAG and a parametric LLM, on factual and multi-hop questions?
+
+2. How does answer accuracy for each system degrade as the number of relational hops required by the question increases (1-hop, 2-hop, 3-hop)?
+
+---
+
+## Dataset
+
+**Source:** OpenAlex (free public API)
+
+- Seed: Stokes et al. (2020), *Cell*
+- Expansion: BFS, up to 2 hops
+- Papers: 600
+- Unique authors: 4,657
+- Direct citation edges: 1,238
+- Open access: 445 / 600
+- Published after 2022: 357
+
+---
+
+## Architecture
+
+```text
+OpenAlex API
+      │
+      ▼
+Data Collection + Abstract Retrieval
+      │
+      ▼
+Knowledge Graph (OWL/RDF, Turtle)
+      │
+      ▼
+OWL Reasoning (owlrl) — inference materialization
+      │
+      ├──────────────► System 1: Parametric LLM
+      │
+      ├──────────────► System 2: Document RAG
+      │                    (embeddings + top-k retrieval)
+      │
+      └──────────────► System 3: Graph RAG
+                           (NL → SPARQL → KG → verbalization)
 ```
 
 ---
 
-## Ordine di esecuzione
+## Knowledge Graph
 
-### Passo 1 — Raccolta dati (~20 min, si lascia girare)
-Apri `01_collect_data.py`, cambia `EMAIL` con la tua email reale, poi:
-```bash
-python 01_collect_data.py
-```
-Produce: `data/papers.json`, `data/authors.json`, `data/edges.json`
+### Main Classes
 
-### Passo 1b — Fetch abstract (~15 min)
-Apri `01b_fetch_abstracts.py`, cambia `EMAIL`, poi:
-```bash
-python 01b_fetch_abstracts.py
-```
-Produce: `data/abstracts.json`
+- Paper
+- Author (`rdfs:subClassOf foaf:Person`)
+- Institution
+- Topic
+- Country
 
-### Passo 2 — Costruzione Knowledge Graph
-```bash
-python 02_build_kg.py
-```
-Produce: `data/antibiotic_kg.ttl`
+### Institution Subclasses
 
-### Passo 3 — Verifica rapida (opzionale ma consigliata)
-```python
-from rdflib import Graph
-g = Graph()
-g.parse("data/antibiotic_kg.ttl", format="turtle")
-print(f"Triple totali: {len(g)}")
-```
+- AcademicInstitution
+- CompanyInstitution
+- NonprofitInstitution
 
-### Passo 4 — Valutazione comparativa
-```bash
-python 04_evaluation.py
-```
-Produce: `results/evaluation_results.json`, `results/scores.csv`
+### Object Properties
 
-**IMPORTANTE**: dopo l'esecuzione, aprire `scores.csv` e compilare
-manualmente `sys1_correct`, `sys2_correct`, `sys3_correct` (0/1)
-confrontando con le risposte in `evaluation_results.json`.
+- cites / citedBy (`owl:inverseOf`)
+- hasAuthor
+- affiliatedWith
+- about
+- locatedIn
+- coAuthorWith (`owl:SymmetricProperty`)
 
-Tassonomia errori da usare:
-- System 1: `invention` / `entity_confusion` / `incomplete`
-- System 2: `chunk_not_retrieved` / `not_in_chunk` / `poor_synthesis`
-- System 3: `malformed_query` / `wrong_relation` / `data_absent`
-
-### Passo 5 — Analisi e grafico
-```bash
-python 05_analyze.py
-```
-Produce: `results/accuracy_vs_hop.png`
+**Graph size:** 103,840 asserted triples → 181,503 after OWL-RL inference materialization.
 
 ---
 
-## Modello embedding (System 2)
+## Hybrid Question Answering
 
-Usiamo `sentence-transformers/all-MiniLM-L6-v2` come baseline leggera (~80MB, no GPU).
-Per risultati migliori, cambiare `EMBED_MODEL` in `03_systems.py` con `BAAI/bge-m3`
-(riferimento: arxiv:2402.03216, suggerito dal prof Pozzi).
+### Document RAG
+
+Used for:
+
+- Narrative synthesis
+- Discursive, multi-paper summaries anchored to abstract text
+
+Example:
+
+```text
+What strategies do researchers propose to combat antimicrobial
+resistance beyond deep learning-based discovery?
+```
+
+↓
+
+Synthesized answer grounded in retrieved abstracts.
+
+### Graph RAG
+
+Used for:
+
+- Multi-hop relational chains
+- Aggregations and comparisons over structured metadata
+
+Example:
+
+```text
+Do review papers have more citations than article papers on average?
+```
+
+↓
+
+```sparql
+SELECT (AVG(?citations) AS ?avg) ?type WHERE { ... } GROUP BY ?type
+```
+
+↓
+
+```text
+Review papers average 242.5 citations vs 203.7 for articles.
+```
 
 ---
 
-## Domande di valutazione
+## Evaluation
 
-Le 30 domande in `04_evaluation.py` hanno ground truth parzialmente template.
-Dopo aver eseguito lo script 01 e avere i dati reali in `data/papers.json`,
-completare i campi `ground_truth` con i valori veri prima della valutazione.
+40 questions, HotpotQA-inspired (Bridge / Comparison / Narrative), graded across hop depths 1–3.
 
-Distribuzione:
-- 10 single-hop  (S01–S10)
-- 10 double-hop  (D01–D10)
-- 10 triple-hop  (T01–T10)
+| System | Bridge | Comparison | Narrative | Total |
+|---|---|---|---|---|
+| Parametric LLM | 0% | 0% | 20% | 7.5% |
+| Document RAG | 0% | 0% | 60% | 22.5% |
+| **Graph RAG** | **73%** | **30%** | 7% | **37.5%** |
+
+SPARQL validity (Graph RAG): 85% — the main bottleneck is query *semantic* correctness, not syntax generation.
+
+No single architecture dominates across all question types: Graph RAG leads on structured relational queries, Document RAG wins on narrative synthesis, and the parametric LLM fails on all dataset-specific structured facts.
 
 ---
 
-## Valutazione inter-annotatore
+## Technology Stack
 
-Entrambi i membri del gruppo annotano **indipendentemente** le stesse
-risposte su una copia separata del CSV, poi confrontano i disaccordi
-prima di fissare i punteggi finali.
+### Semantic Web
+
+- OWL
+- RDF / Turtle
+- SPARQL
+- RDFLib
+- Protégé + HermiT (design-time) / owlrl (materialization)
+
+### Python
+
+- sentence-transformers
+- NumPy
+- Streamlit
+
+### LLMs
+
+- Gemini 2.5 Flash
+
+---
+
+## Installation
+
+Clone the repository:
+
+```bash
+git clone https://github.com/rossini24/Data_Semantics_project.git
+cd Data_Semantics_project
+```
+
+Create a virtual environment:
+
+```bash
+python -m venv venv
+```
+
+Activate it:
+
+Linux / macOS
+
+```bash
+source venv/bin/activate
+```
+
+Windows
+
+```bash
+venv\Scripts\activate
+```
+
+Install dependencies:
+
+```bash
+pip install requests rdflib owlrl google-genai sentence-transformers numpy matplotlib python-dotenv streamlit
+```
+
+Add a `.env` file with `GOOGLE_API_KEY=your-key-here`, then run scripts `01` through `05` in order (see docstrings for details).
+
+---
+
+## Limitations
+
+- Comparison questions have uneven sample sizes across hop depths (as few as 2 at hop-3).
+- Automated RAGAS scoring for narrative questions could not be reliably configured with Gemini; narrative answers are scored manually instead, following the same Faithfulness/Answer Relevance criteria.
+- Graph RAG struggles with SPARQL aggregation patterns (UNION, nested GROUP BY) more than relation-chaining queries.
+- Results are based on a single seed paper and domain; generalization to other citation networks is untested.
+
+---
+
+## Authors
+
+- **Luca Rossini**
+- **Lorenzo Zanotti**
+
+Data Semantics — University of Milano-Bicocca
+
+---
+
+## License
+
+This repository is released for academic and research purposes.
